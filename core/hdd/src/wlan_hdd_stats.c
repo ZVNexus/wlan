@@ -4560,11 +4560,36 @@ static void hdd_fill_rate_info(struct wlan_objmgr_psoc *psoc,
  * Return: None
  */
 static void wlan_hdd_fill_station_info(struct wlan_objmgr_psoc *psoc,
+				       struct hdd_adapter *adapter,
 				       struct station_info *sinfo,
 				       struct hdd_station_info *stainfo,
 				       struct hdd_fw_txrx_stats *stats)
 {
 	qdf_time_t curr_time, dur;
+	struct cdp_peer_stats *peer_stats;
+	QDF_STATUS status;
+
+	peer_stats = qdf_mem_malloc(sizeof(*peer_stats));
+	if (!peer_stats)
+		return;
+
+	status =
+		cdp_host_get_peer_stats(cds_get_context(QDF_MODULE_ID_SOC),
+					adapter->vdev_id,
+					stainfo->sta_mac.bytes,
+					peer_stats);
+
+	if (QDF_IS_STATUS_ERROR(status)) {
+		hdd_err("cdp_host_get_peer_stats failed. error: %u", status);
+		qdf_mem_free(peer_stats);
+		return;
+	}
+
+	stainfo->last_tx_rx_ts =
+		peer_stats->tx.last_tx_ts > peer_stats->rx.last_rx_ts ?
+		peer_stats->tx.last_tx_ts : peer_stats->rx.last_rx_ts;
+
+	qdf_mem_free(peer_stats);
 
 	curr_time = qdf_system_ticks();
 	dur = curr_time - stainfo->assoc_ts;
@@ -4868,7 +4893,8 @@ static int wlan_hdd_get_station_remote(struct wiphy *wiphy,
 	txrx_stats.rssi = stats->peer_stats_info_ext->rssi
 			+ WLAN_HDD_TGT_NOISE_FLOOR_DBM;
 	wlan_hdd_fill_rate_info(&txrx_stats, stats->peer_stats_info_ext);
-	wlan_hdd_fill_station_info(hddctx->psoc, sinfo, stainfo, &txrx_stats);
+	wlan_hdd_fill_station_info(hddctx->psoc, adapter,
+				   sinfo, stainfo, &txrx_stats);
 	wlan_cfg80211_mc_cp_stats_free_stats_event(stats);
 	hdd_put_sta_info_ref(&adapter->sta_info_list, &stainfo, true,
 			     STA_INFO_WLAN_HDD_GET_STATION_REMOTE);
@@ -5410,6 +5436,33 @@ static int wlan_hdd_get_sta_stats(struct wiphy *wiphy,
 
 	adapter->rssi = adapter->hdd_stats.summary_stat.rssi;
 	snr = adapter->hdd_stats.summary_stat.snr;
+
+#ifdef OPLUS_BUG_STABILITY
+    //Add for:Avoid upload invalid RSSI to upper layer when a new connection established.
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 14, 0))
+	{
+#define HW_VALID_RSSI_THRESHOLD (-90)
+			bool isValidRssi = true;
+			int i = 0;
+			if (adapter->rssi < HW_VALID_RSSI_THRESHOLD) {
+				for (i = 0; i < NUM_CHAINS_MAX; i++) {
+					if (adapter->hdd_stats.per_chain_rssi_stats.rssi[i] != WLAN_HDD_TGT_NOISE_FLOOR_DBM)
+						break;
+				}
+
+				if (i == NUM_CHAINS_MAX)
+					isValidRssi = false;
+			}
+
+			if (!isValidRssi) {
+				hdd_debug("get invalid RSSI from FW, use RSSI from scan result! HW combined RSSI=%d, Chain RSSI=%d.",
+					adapter->rssi, adapter->hdd_stats.per_chain_rssi_stats.rssi[0]);
+				adapter->rssi = 0;
+			}
+#undef HW_VALID_RSSI_THRESHOLD
+	}
+#endif
+#endif /* OPLUS_BUG_STABILITY */
 
 	/* for new connection there might be no valid previous RSSI */
 	if (!adapter->rssi) {
@@ -6708,6 +6761,37 @@ int wlan_hdd_get_temperature(struct hdd_adapter *adapter, int *temperature)
 	return 0;
 }
 
+#ifdef TX_MULTIQ_PER_AC
+static inline
+void wlan_hdd_display_tx_multiq_stats(struct hdd_tx_rx_stats *stats)
+{
+	uint32_t total_inv_sk_and_skb_hash = 0;
+	uint32_t total_qselect_existing_skb_hash = 0;
+	uint32_t total_qselect_sk_tx_map = 0;
+	uint32_t total_qselect_skb_hash = 0;
+	uint8_t i;
+
+	for (i = 0; i < NUM_CPUS; i++) {
+		total_inv_sk_and_skb_hash +=
+					  stats->per_cpu[i].inv_sk_and_skb_hash;
+		total_qselect_existing_skb_hash +=
+				    stats->per_cpu[i].qselect_existing_skb_hash;
+		total_qselect_sk_tx_map += stats->per_cpu[i].qselect_sk_tx_map;
+		total_qselect_skb_hash +=
+					stats->per_cpu[i].qselect_skb_hash_calc;
+	}
+
+	hdd_debug("TX_MULTIQ: INV %u skb_hash %u sk_tx_map %u skb_hash_calc %u",
+		  total_inv_sk_and_skb_hash, total_qselect_existing_skb_hash,
+		  total_qselect_sk_tx_map, total_qselect_skb_hash);
+}
+#else
+static inline
+void wlan_hdd_display_tx_multiq_stats(struct hdd_tx_rx_stats *stats)
+{
+}
+#endif
+
 void wlan_hdd_display_txrx_stats(struct hdd_context *ctx)
 {
 	struct hdd_adapter *adapter = NULL, *next_adapter = NULL;
@@ -6731,7 +6815,7 @@ void wlan_hdd_display_txrx_stats(struct hdd_context *ctx)
 		total_tx_orphaned = 0;
 		stats = &adapter->hdd_stats.tx_rx_stats;
 
-		if (adapter->vdev_id == INVAL_VDEV_ID) {
+		if (adapter->vdev_id == WLAN_INVALID_VDEV_ID) {
 			hdd_adapter_dev_put_debug(adapter, dbgid);
 			continue;
 		}
@@ -6763,6 +6847,8 @@ void wlan_hdd_display_txrx_stats(struct hdd_context *ctx)
 		hdd_debug("TX - called %u, dropped %u orphan %u",
 			  total_tx_pkt, total_tx_dropped,
 			  total_tx_orphaned);
+
+		wlan_hdd_display_tx_multiq_stats(stats);
 
 		for (i = 0; i < NUM_CPUS; i++) {
 			if (stats->per_cpu[i].rx_packets == 0)

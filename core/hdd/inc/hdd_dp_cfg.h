@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2012-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -415,6 +416,29 @@
 #ifdef WLAN_FEATURE_DP_BUS_BANDWIDTH
 /*
  * <ini>
+ * gBusBandwidthUltraHighThreshold - bus bandwidth ultra high threshold
+ *
+ * @Min: 0
+ * @Max: 4294967295UL
+ * @Default: 12000
+ *
+ * This ini specifies the bus bandwidth very high threshold
+ *
+ * Usage: Internal
+ *
+ * </ini>
+ */
+#define CFG_DP_BUS_BANDWIDTH_ULTRA_HIGH_THRESHOLD \
+		CFG_INI_UINT( \
+		"gBusBandwidthUltraHighThreshold", \
+		0, \
+		4294967295UL, \
+		12000, \
+		CFG_VALUE_OR_DEFAULT, \
+		"Bus bandwidth ultra high threshold")
+
+/*
+ * <ini>
  * gBusBandwidthVeryHighThreshold - bus bandwidth very high threshold
  *
  * @Min: 0
@@ -435,7 +459,28 @@
 		9000, \
 		CFG_VALUE_OR_DEFAULT, \
 		"Bus bandwidth very high threshold")
-
+/*
+ * <ini>
+ * gBusBandwidthDBSThreshold - bus bandwidth for DBS mode threshold
+ *
+ * @Min: 0
+ * @Max: 4294967295UL
+ * @Default: 6000
+ *
+ * This ini specifies the bus bandwidth high threshold
+ *
+ * Usage: Internal
+ *
+ * </ini>
+ */
+#define CFG_DP_BUS_BANDWIDTH_DBS_THRESHOLD \
+		CFG_INI_UINT( \
+		"gBusBandwidthDBSThreshold", \
+		0, \
+		4294967295UL, \
+		6000, \
+		CFG_VALUE_OR_DEFAULT, \
+		"Bus bandwidth DBS mode threshold")
 /*
  * <ini>
  * gBusBandwidthHighThreshold - bus bandwidth high threshold
@@ -1179,11 +1224,18 @@
  *
  * </ini>
  */
+#ifndef OPLUS_BUG_STABILITY
+//Modify the maximum value of rx_wakelock_timeout to 250
 #define CFG_DP_RX_WAKELOCK_TIMEOUT \
 	CFG_INI_UINT("rx_wakelock_timeout", \
 	0, 100, 50, CFG_VALUE_OR_DEFAULT, \
 	"Amount of time to hold wakelock for RX unicast packets")
-
+#else /* OPLUS_BUG_STABILITY */
+#define CFG_DP_RX_WAKELOCK_TIMEOUT \
+	CFG_INI_UINT("rx_wakelock_timeout", \
+	0, 250, 50, CFG_VALUE_OR_DEFAULT, \
+	"Amount of time to hold wakelock for RX unicast packets")
+#endif /* OPLUS_BUG_STABILITY */
 /*
  * <ini>
  * num_dp_rx_threads - Control to set the number of dp rx threads
@@ -1480,7 +1532,9 @@
 
 #ifdef WLAN_FEATURE_DP_BUS_BANDWIDTH
 #define CFG_HDD_DP_BUS_BANDWIDTH \
+	CFG(CFG_DP_BUS_BANDWIDTH_ULTRA_HIGH_THRESHOLD) \
 	CFG(CFG_DP_BUS_BANDWIDTH_VERY_HIGH_THRESHOLD) \
+	CFG(CFG_DP_BUS_BANDWIDTH_DBS_THRESHOLD) \
 	CFG(CFG_DP_BUS_BANDWIDTH_HIGH_THRESHOLD) \
 	CFG(CFG_DP_BUS_BANDWIDTH_MEDIUM_THRESHOLD) \
 	CFG(CFG_DP_BUS_BANDWIDTH_LOW_THRESHOLD) \

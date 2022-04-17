@@ -263,6 +263,9 @@
  *
  * </ini>
  */
+ //ifdef VENDOR_EDIT
+ //Modify for set default SoftAP client count to 10
+ /*
  #define CFG_SAP_MAX_NO_PEERS CFG_INI_UINT( \
 			"gSoftApMaxPeers", \
 			1, \
@@ -270,6 +273,16 @@
 			32, \
 			CFG_VALUE_OR_DEFAULT, \
 			"max no of peers")
+ */
+ //else
+ #define CFG_SAP_MAX_NO_PEERS CFG_INI_UINT( \
+			"gSoftApMaxPeers", \
+			1, \
+			64, \
+			10, \
+			CFG_VALUE_OR_DEFAULT, \
+			"max no of peers")
+//endif /* VENDOR_EDIT */
 
 /*
  * <ini>

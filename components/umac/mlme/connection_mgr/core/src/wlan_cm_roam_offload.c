@@ -4568,7 +4568,6 @@ static void cm_roam_start_init(struct wlan_objmgr_psoc *psoc,
 	uint8_t vdev_id = wlan_vdev_get_id(vdev);
 	struct wlan_mlme_psoc_ext_obj *mlme_obj;
 	enum QDF_OPMODE opmode;
-	uint32_t current_band;
 
 	opmode = wlan_vdev_mlme_get_opmode(vdev);
 	if (opmode != QDF_STA_MODE) {
@@ -4596,8 +4595,6 @@ static void cm_roam_start_init(struct wlan_objmgr_psoc *psoc,
 					       DEFAULT_ROAM_SCAN_SCHEME_BITMAP);
 	wlan_cm_roam_cfg_get_value(psoc, vdev_id,
 				   MOBILITY_DOMAIN, &src_cfg);
-	ucfg_reg_get_band(pdev, &current_band);
-	wlan_cm_set_roam_band_bitmask(psoc, vdev_id, current_band);
 
 	mdie_present = src_cfg.bool_value;
 	/* Based on the auth scheme tell if we are 11r */
@@ -4968,6 +4965,7 @@ cm_send_roam_invoke_req(struct cnx_mgr *cm_ctx, struct cm_req *req)
 	struct roam_invoke_req *roam_invoke_req = NULL;
 	wlan_cm_id cm_id;
 	uint8_t vdev_id;
+	uint8_t enable_self_bss_roam = false;
 
 	if (!req)
 		return QDF_STATUS_E_FAILURE;
@@ -5006,9 +5004,17 @@ cm_send_roam_invoke_req(struct cnx_mgr *cm_ctx, struct cm_req *req)
 		goto send_cmd;
 	}
 
-	if (qdf_is_macaddr_equal(&roam_req->req.bssid, &connected_bssid))
-		roam_invoke_req->is_same_bssid = true;
-
+	wlan_mlme_get_self_bss_roam(psoc, &enable_self_bss_roam);
+	if (qdf_is_macaddr_equal(&roam_req->req.bssid, &connected_bssid)) {
+		if (enable_self_bss_roam) {
+			roam_invoke_req->is_same_bssid = true;
+		} else {
+			mlme_err(CM_PREFIX_FMT "self bss roam disabled",
+				 CM_PREFIX_REF(vdev_id, cm_id));
+			status = QDF_STATUS_E_FAILURE;
+			goto roam_err;
+		}
+	}
 	qdf_copy_macaddr(&roam_invoke_req->target_bssid, &roam_req->req.bssid);
 	roam_invoke_req->ch_freq = roam_req->req.chan_freq;
 

@@ -158,14 +158,25 @@ struct hdd_apf_context {
 };
 #endif /* FEATURE_WLAN_APF */
 
+#ifdef TX_MULTIQ_PER_AC
+#define TX_GET_QUEUE_IDX(ac, off) (((ac) * TX_QUEUES_PER_AC) + (off))
+#define TX_QUEUES_PER_AC 4
+#else
+#define TX_GET_QUEUE_IDX(ac, off) (ac)
+#define TX_QUEUES_PER_AC 1
+#endif
+
 /** Number of Tx Queues */
 #if defined(QCA_LL_TX_FLOW_CONTROL_V2) || \
 	defined(QCA_HL_NETDEV_FLOW_CONTROL) || \
 	defined(QCA_LL_PDEV_TX_FLOW_CONTROL)
-#define NUM_TX_QUEUES 5
+/* Only one HI_PRIO queue */
+#define NUM_TX_QUEUES (4 * TX_QUEUES_PER_AC + 1)
 #else
-#define NUM_TX_QUEUES 4
+#define NUM_TX_QUEUES (4 * TX_QUEUES_PER_AC)
 #endif
+
+#define NUM_RX_QUEUES 5
 
 /*
  * Number of DPTRACE records to dump when a cfg80211 disconnect with reason
@@ -579,7 +590,16 @@ struct hdd_tx_rx_stats {
 		__u32    tx_orphaned;
 		__u32    tx_classified_ac[WLAN_MAX_AC];
 		__u32    tx_dropped_ac[WLAN_MAX_AC];
-
+#ifdef TX_MULTIQ_PER_AC
+		/* Neither valid socket nor skb->hash */
+		uint32_t inv_sk_and_skb_hash;
+		/* skb->hash already calculated */
+		uint32_t qselect_existing_skb_hash;
+		/* valid tx queue id in socket */
+		uint32_t qselect_sk_tx_map;
+		/* skb->hash calculated in select queue */
+		uint32_t qselect_skb_hash_calc;
+#endif
 		/* rx stats */
 		__u32 rx_packets;
 		__u32 rx_dropped;
@@ -1861,6 +1881,35 @@ struct hdd_dual_sta_policy {
 	uint8_t primary_vdev_id;
 };
 
+#if defined(WLAN_FEATURE_DP_BUS_BANDWIDTH) && defined(FEATURE_RUNTIME_PM)
+/**
+ * enum hdd_rtpm_tput_policy_state - states to track runtime_pm tput policy
+ * @RTPM_TPUT_POLICY_STATE_INVALID: invalid state
+ * @RTPM_TPUT_POLICY_STATE_REQUIRED: state indicating runtime_pm is required
+ * @RTPM_TPUT_POLICY_STATE_NOT_REQUIRE: state indicating runtime_pm is NOT
+ * required
+ */
+enum hdd_rtpm_tput_policy_state {
+	RTPM_TPUT_POLICY_STATE_INVALID,
+	RTPM_TPUT_POLICY_STATE_REQUIRED,
+	RTPM_TPUT_POLICY_STATE_NOT_REQUIRED
+};
+
+/**
+ * struct hdd_rtpm_tput_policy_context - RTPM throughput policy context
+ * @curr_state: current state of throughput policy (RTPM require or not)
+ * @wake_lock: wakelock for QDF wake_lock acquire/release APIs
+ * @rtpm_lock: lock use for QDF rutime PM prevent/allow APIs
+ * @high_tput_vote: atomic variable to keep track of voting
+ */
+struct hdd_rtpm_tput_policy_context {
+	enum hdd_rtpm_tput_policy_state curr_state;
+	qdf_wake_lock_t wake_lock;
+	qdf_runtime_lock_t rtpm_lock;
+	qdf_atomic_t high_tput_vote;
+};
+#endif
+
 /**
  * struct hdd_context - hdd shared driver and psoc/device context
  * @psoc: object manager psoc context
@@ -1876,6 +1925,7 @@ struct hdd_dual_sta_policy {
  * @country_change_work: work for updating vdev when country changes
  * @rx_aggregation: rx aggregation enable or disable state
  * @gro_force_flush: gro force flushed indication flag
+ * @force_gro_enable: force GRO enable or disable flag
  * @current_pcie_gen_speed: current pcie gen speed
  * @pm_qos_req: pm_qos request for all cpu cores
  * @qos_cpu_mask: voted cpu core mask
@@ -1979,6 +2029,9 @@ struct hdd_context {
 	uint64_t prev_tx;
 	qdf_atomic_t low_tput_gro_enable;
 	uint32_t bus_low_vote_cnt;
+#ifdef FEATURE_RUNTIME_PM
+	struct hdd_rtpm_tput_policy_context rtpm_tput_policy_ctx;
+#endif
 #endif /*WLAN_FEATURE_DP_BUS_BANDWIDTH*/
 
 	struct completion ready_to_suspend;
@@ -2219,6 +2272,7 @@ struct hdd_context {
 	struct {
 		qdf_atomic_t rx_aggregation;
 		uint8_t gro_force_flush[DP_MAX_RX_THREADS];
+		bool force_gro_enable;
 	} dp_agg_param;
 	int current_pcie_gen_speed;
 	qdf_workqueue_t *adapter_ops_wq;
@@ -2321,6 +2375,26 @@ struct hdd_channel_info {
 	u_int8_t vht_center_freq_seg0;
 	u_int8_t vht_center_freq_seg1;
 };
+
+#ifdef OPLUS_FEATURE_WIFI_DCS_SWITCH
+//Add for wifi switch monitor
+enum wlan_hostdriver_loadstatus {
+	INSMOD_SUCCESS = 1,
+	INSMOD_FAIL,
+	RMMOD_SUCCESS,
+	RMMOD_FAIL,
+	INI_PRASE_SUCCESS,
+	INI_PRASE_FAIL,
+};
+
+struct wlan_hostdriver_loadresult {
+	u_int8_t insmod_status;
+	u_int8_t rmmod_status;
+	u_int8_t ini_prase_status;
+};
+
+void wlan_driver_send_uevent(char *enable);
+#endif /* OPLUS_FEATURE_WIFI_DCS_SWITCH */
 
 /**
  * struct hdd_chwidth_info - channel width related info
